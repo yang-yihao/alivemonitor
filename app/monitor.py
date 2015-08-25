@@ -27,9 +27,9 @@ def log_exception_elegantly(exception):
     if hasattr(exception, 'reason'):
         reason = exception.reason
     logging.error(str(reason) + '\n')
-    # logging.error('======== EXCEPTION STACK BEGINS ========')
-    # logging.exception(exception)
-    # logging.error('======== EXCEPTION STACK ENDS ========\n')
+    logging.error('======== EXCEPTION STACK BEGINS ========')
+    logging.exception(exception)
+    logging.error('======== EXCEPTION STACK ENDS ========\n')
 
 
 def send_email(receivers, title, url, reason, detail=''):
@@ -46,16 +46,21 @@ def send_email(receivers, title, url, reason, detail=''):
     server_url = 'smtp.qq.com'
     sender = 'sysadmin@sietai.com'
     password = 'ovSE1s<s'
-    server = smtplib.SMTP(server_url)
-    # server.set_debuglevel(1)
-    server.login(sender, password)
-    msg = MIMEText(_text=content, _charset="utf-8")
-    msg['subject'] = title
-    msg['from'] = 'sysadmin@sietai.com'
-    msg['to'] = ','.join(receivers)
-    server.sendmail(sender, receivers, msg.as_string())
-    server.quit()
-    logging.info('Alert Mail [%s] sent to [%s].' % title, ', '.join(receivers))
+    try:
+        with smtplib.SMTP(server_url) as server:
+            # server.set_debuglevel(1)
+            server.login(sender, password)
+            msg = MIMEText(_text=content, _charset="utf-8")
+            msg['subject'] = title
+            msg['from'] = 'sysadmin@sietai.com'
+            msg['to'] = ','.join(receivers)
+            server.sendmail(sender, receivers, msg.as_string())
+            server.quit()
+            time.sleep(3)
+            logging.info('Alert Mail [%s] sent to [%s].' %
+                         (title, ', '.join(receivers)))
+    except Exception as e:
+        log_exception_elegantly(e)
 
 
 def test_service_available(url, alert_receivers):
@@ -87,18 +92,18 @@ def test_service_available(url, alert_receivers):
                 ns = {url: {'available_last_time': False, 'retry_times': 0}}
                 services.update(ns)
             else:   # s is not None or s['available_last_time'] is False
-                ns = {url: {
-                    'available_last_time': False,
-                    'retry_times': s['retry_times']+1}}
-                services.update(ns)
-                if s['retry_times'] == conf.RETRY_TIMES_FOR_DOWN:
+                retry_times = s['retry_times']+1
+                if retry_times == conf.RETRY_TIMES_FOR_DOWN:
                     logging.warning(url + ' is DOWN!')
                     send_email(
                         alert_receivers, 'Service Unavailable',
                         url, reason, reason
                     )
+                ns = {url: {
+                    'available_last_time': False,
+                    'retry_times': retry_times}}
+                services.update(ns)
         else:   # service_available is True
-            # TODO fix bug here
             if s is not None and \
                     s['available_last_time'] is False:
                 if s['retry_times'] >= conf.RETRY_TIMES_FOR_DOWN:
@@ -138,10 +143,13 @@ def test_alive():
 
     global services
     while True:
-        logging.info('services status: ' + str(services))
-        for item in conf.ALERTS:
-            test_service_available(item['url'], item['alert_receiver'])
-        time.sleep(conf.MONITOR_INTERVAL)
+        try:
+            logging.info('services status: ' + str(services))
+            for item in conf.ALERTS:
+                test_service_available(item['url'], item['alert_receiver'])
+            time.sleep(conf.MONITOR_INTERVAL)
+        except Exception as e:
+            log_exception_elegantly(e)
 
 
 def start():
